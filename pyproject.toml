@@ -3,18 +3,18 @@ requires = ["pdm-backend"]
 build-backend = "pdm.backend"
 
 [project]
-name = "stack-pr"
+name = "stack-mr"
 authors = [
-    {name = "Modular Inc", email = "hello@modular.com"},
+    {name = "River707", email = "..."},
 ]
 maintainers = [
-    {name = "Modular Inc", email = "hello@modular.com"}
+    {name = "River707", email = "..."}
 ]
-description = "Stacked PR CLI for Github"
+description = "Stacked MR CLI for GitLab"
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.9"
-keywords = ["stacked-prs", "github", "pull-requests", "stack-pr", "git", "version-control"]
+keywords = ["stacked-prs", "gitlab", "pull-requests", "stack-mr", "git", "version-control"]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
@@ -27,12 +27,12 @@ dynamic = ["version"]
 dependencies = []
 
 [project.urls]
-Homepage = "https://github.com/modularml/stack-pr"
-Repository = "https://github.com/modularml/stack-pr"
-"Bug Tracker" = "https://github.com/modularml/stack-pr/issues"
+Homepage = "https://github.com/River707/stack-mr"
+Repository = "https://github.com/River707/stack-mr"
+"Bug Tracker" = "https://github.com/River707/stack-mr/issues"
 
 [project.scripts]
-stack-pr = "stack_pr.cli:main"
+stack-mr = "stack_pr.cli:main"
 
 [tool.pdm]
 distribution = true
@@ -46,7 +46,7 @@ channels = ["conda-forge"]
 platforms = ["osx-arm64", "osx-64", "linux-64", "linux-aarch64"]
 
 [tool.pixi.pypi-dependencies]
-stack-pr = { path = ".", editable = true }
+stack-mr = { path = ".", editable = true }
 pdm = ">=2.17.1,<2.18"
 
 [tool.pixi.tasks]

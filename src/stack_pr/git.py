@@ -153,28 +153,28 @@ def get_uncommitted_changes(
 
 
 # TODO: enforce this as a module dependency
-def check_gh_installed():
-    """Check if the gh tool is installed.
+def check_glab_installed():
+    """Check if the glab tool is installed.
 
     Raises:
-        GitError if gh is not available.
+        GitError if glab is not available.
     """
 
     try:
-        run_shell_command(["gh"], capture_output=True)
+        run_shell_command(["glab"], capture_output=True)
     except subprocess.CalledProcessError as err:
         raise GitError(
-            "'gh' is not installed. Please visit https://cli.github.com/ for"
+            "'glab' is not installed. Please visit https://gitlab.com/gitlab-org/cli/#installation for"
             " installation instuctions."
         ) from err
 
 
 # TODO: figure out how to test this
-def get_gh_username() -> str:
-    """Return the current github username.
+def get_glab_username() -> str:
+    """Return the current gitlab username.
 
     Returns:
-        Current github username as a string.
+        Current gitlab username as a string.
 
     Raises:
         GitError: if called outside a git repo, or.
@@ -182,20 +182,16 @@ def get_gh_username() -> str:
 
     user_query = get_command_output(
         [
-            "gh",
+            "glab",
             "api",
-            "graphql",
-            "-f",
-            "owner=UserCurrent",
-            "-f",
-            "query=query{viewer{login}}",
+            "user"
         ]
     )
 
     # Extract the login name.
-    m = re.search(r"\"login\":\"(.*?)\"", user_query)
+    m = re.search(r"\"username\":\"(.*?)\"", user_query)
     if not m:
-        raise GitError("Unable to find current github user name")
+        raise GitError("Unable to find current gitlab user name")
 
     return m.group(1)
 

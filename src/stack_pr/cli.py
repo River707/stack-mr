@@ -1,4 +1,4 @@
-# stack-pr: a tool for working with stacked PRs on github.
+# stack-pr: a tool for working with stacked PRs on gitlab.
 #
 # ---------------
 # stack-pr submit
@@ -51,13 +51,14 @@ import argparse
 import json
 import os
 import re
+import shlex
 from subprocess import SubprocessError
 
 from stack_pr.git import (
     branch_exists,
-    check_gh_installed,
+    check_glab_installed,
     get_current_branch_name,
-    get_gh_username,
+    get_glab_username,
     get_uncommitted_changes,
 )
 from stack_pr.shell_commands import get_command_output, run_shell_command
@@ -72,12 +73,9 @@ RE_RAW_PARENT = re.compile(r"^parent (?P<commit>[a-f0-9]+)$", re.MULTILINE)
 RE_RAW_TREE = re.compile(r"^tree (?P<tree>.+)$", re.MULTILINE)
 RE_RAW_COMMIT_MSG_LINE = re.compile(r"^    (?P<line>.*)$", re.MULTILINE)
 
-# stack-info: PR: https://github.com/modularml/test-ghstack/pull/30, branch: mvz/stack/7
+# stack-info: PR: https://gitlab.com/modularml/test-ghstack/pull/30, branch: mvz/stack/7
 RE_STACK_INFO_LINE = re.compile(
-    r"\n^stack-info: PR: (.+), branch: (.+)\n?", re.MULTILINE
-)
-RE_PR_TOC = re.compile(
-    r"^Stacked PRs:\r?\n(^ \* (__->__)?#\d+\r?\n)*\r?\n", re.MULTILINE
+    r"\n^stack-info: MR: (.+), branch: (.+)\n?", re.MULTILINE
 )
 
 # Delimeter for PR body
@@ -89,17 +87,17 @@ CROSS_LINKS_DELIMETER = "--- --- ---"
 ERROR_CANT_UPDATE_META = """Couldn't update stack metadata for
     {e}
 """
-ERROR_CANT_CREATE_PR = """Could not create a new PR for:
+ERROR_CANT_CREATE_PR = """Could not create a new MR for:
     {e}
 
 Failed trying to execute {cmd}
 """
-ERROR_CANT_REBASE = """Could not rebase the PR on '{target}'. Failed to land PR:
+ERROR_CANT_REBASE = """Could not rebase the MR on '{target}'. Failed to land MR:
     {e}
 
 Failed trying to execute {cmd}
 """
-ERROR_CANT_CHECKOUT_REMOTE_BRANCH = """Could not checkout remote branch '{e.head}'. Failed to land PR:
+ERROR_CANT_CHECKOUT_REMOTE_BRANCH = """Could not checkout remote branch '{e.head}'. Failed to land MR:
     {e}
 
 Failed trying to execute {cmd}
@@ -109,41 +107,41 @@ ERROR_STACKINFO_MISSING = """A stack entry is missing some information:
 
 If you wanted to land a part of the stack, please use -B and -H options to
 specify base and head revisions.
-If you wanted to land the entire stack, please use 'submit' first.
-If you hit this error trying to submit, please report a bug!
+If you wanted to land the entire stack, please use 'export' first.
+If you hit this error trying to export, please report a bug!
 """
-ERROR_STACKINFO_BAD_LINK = """Bad PR link in stack metadata!
+ERROR_STACKINFO_BAD_LINK = """Bad MR link in stack metadata!
     {e}
 """
-ERROR_STACKINFO_MALFORMED_RESPONSE = """Malformed response from GH!
+ERROR_STACKINFO_MALFORMED_RESPONSE = """Malformed response from GitLab!
 
 Returned json object is missing a field {required_field}
-PR info from github: {d}
+MR info from gitlab: {d}
 
 Failed verification for:
      {e}
 """
-ERROR_STACKINFO_PR_NOT_OPEN = """Associated PR is not in 'OPEN' state!
+ERROR_STACKINFO_PR_NOT_OPEN = """Associated MR is not in 'opened' state!
      {e}
 
-PR info from github: {d}
+MR info from gitlab: {d}
 """
-ERROR_STACKINFO_PR_NUMBER_MISMATCH = """PR number on github mismatches PR number in stack metadata!
+ERROR_STACKINFO_PR_NUMBER_MISMATCH = """MR number on gitlab mismatches MR number in stack metadata!
      {e}
 
-PR info from github: {d}
+MR info from gitlab: {d}
 """
-ERROR_STACKINFO_PR_HEAD_MISMATCH = """Head branch name on github mismatches head branch name in stack metadata!
+ERROR_STACKINFO_PR_HEAD_MISMATCH = """Head branch name on gitlab mismatches head branch name in stack metadata!
      {e}
 
-PR info from github: {d}
+MR info from gitlab: {d}
 """
-ERROR_STACKINFO_PR_BASE_MISMATCH = """Base branch name on github mismatches base branch name in stack metadata!
+ERROR_STACKINFO_PR_BASE_MISMATCH = """Base branch name on gitlab mismatches base branch name in stack metadata!
      {e}
 
-If you are trying land the stack, please update it first by calling 'submit'.
+If you are trying land the stack, please update it first by calling 'export'.
 
-PR info from github: {d}
+MR info from gitlab: {d}
 """
 ERROR_REPO_DIRTY = """There are uncommitted changes.
 
@@ -163,8 +161,8 @@ To land it, you could run:
 If you'd like to land stack except the top N commits, you could use the following command:
   $ stack-pr land -B {top_commit}~{stack_size} -H {top_commit}~N
 
-If you prefer to merge via the github web UI, please don't forget to edit commit message on the merge page!
-If you use the default commit message filled by the web UI, links to other PRs from the stack will be included in the commit message.
+If you prefer to merge via the gitlab web UI, please don't forget to edit commit message on the merge page!
+If you use the default commit message filled by the web UI, links to other MRs from the stack will be included in the commit message.
 """
 
 
@@ -273,9 +271,12 @@ class StackEntry:
         s = b(self.commit.commit_id()[:8])
         pr_string = None
         if self.has_pr():
-            pr_string = blue("#" + self.pr.split("/")[-1])
+            pr_string = blue("!" + self.pr.split("/")[-1])
+            if self.is_mergeable():
+                pr_string += ", " + green("ready to merge")
+
         else:
-            pr_string = red("no PR")
+            pr_string = red("no MR")
         branch_string = None
         if self._head or self._base:
             head_str = green(self._head) if self._head else red(str(self._head))
@@ -291,6 +292,12 @@ class StackEntry:
             s += ")"
         s += ": " + self.commit.title()
         return s
+
+    def is_mergeable(self):
+        out = get_command_output(
+            ["glab", "mr", "view", last(self.pr), "-F", "json"],
+        )
+        return json.loads(out)["merge_status"].strip() == "can_be_merged"
 
     def __repr__(self):
         return self.pprint()
@@ -368,6 +375,8 @@ def is_valid_ref(ref: str) -> bool:
 def last(ref: str, sep: str = "/") -> str:
     return ref.rsplit("/", 1)[1]
 
+def shell_quote(s: str):
+    return shlex.quote(s)[1:-1]
 
 # TODO: Move to 'modular.utils.git'
 def is_ancestor(commit1: str, commit2: str) -> bool:
@@ -435,29 +444,29 @@ def verify(st: List[StackEntry], check_base: bool = False):
 
         ghinfo = get_command_output(
             [
-                "gh",
-                "pr",
+                "glab",
+                "mr",
                 "view",
-                e.pr,
-                "--json",
-                "baseRefName,headRefName,number,state,body,title,url",
+                last(e.pr),
+                "-F",
+                "json",
             ]
         )
         d = json.loads(ghinfo)
-        for required_field in ["state", "number", "baseRefName", "headRefName"]:
+        for required_field in ["state", "iid", "target_branch", "source_branch"]:
             if required_field not in d:
                 error(ERROR_STACKINFO_MALFORMED_RESPONSE.format(**locals()))
                 raise RuntimeError
 
-        if d["state"] != "OPEN":
+        if d["state"] != "opened":
             error(ERROR_STACKINFO_PR_NOT_OPEN.format(**locals()))
             raise RuntimeError
 
-        if int(last(e.pr)) != d["number"]:
+        if int(last(e.pr)) != d["iid"]:
             error(ERROR_STACKINFO_PR_NUMBER_MISMATCH.format(**locals()))
             raise RuntimeError
 
-        if e.head != d["headRefName"]:
+        if e.head != d["source_branch"]:
             error(ERROR_STACKINFO_PR_HEAD_MISMATCH.format(**locals()))
             raise RuntimeError
 
@@ -465,7 +474,7 @@ def verify(st: List[StackEntry], check_base: bool = False):
         # new commit is added to the middle of the stack). It is not an issue
         # if we're updating the stack (i.e. in 'submit'), but it is an issue if
         # we are trying to land it.
-        if check_base and e.base != d["baseRefName"]:
+        if check_base and e.base != d["target_branch"]:
             error(ERROR_STACKINFO_PR_BASE_MISMATCH.format(**locals()))
             raise RuntimeError
 
@@ -509,7 +518,7 @@ def add_or_update_metadata(e: StackEntry, needs_rebase: bool) -> bool:
         return needs_rebase
 
     # Add the stack info metadata to the commit message
-    commit_msg += f"\n\nstack-info: PR: {e.pr}, branch: {e.head}"
+    commit_msg += f"\n\nstack-info: MR: {e.pr}, branch: {e.head}"
     run_shell_command(
         ["git", "commit", "--amend", "-F", "-"], input=commit_msg.encode()
     )
@@ -517,7 +526,7 @@ def add_or_update_metadata(e: StackEntry, needs_rebase: bool) -> bool:
 
 
 def get_available_branch_name(remote: str) -> str:
-    username = get_gh_username()
+    username = get_glab_username()
 
     refs = get_command_output(
         [
@@ -576,19 +585,23 @@ def create_pr(e: StackEntry, is_draft: bool, reviewer: str = ""):
     # Don't do anything if the PR already exists
     if e.has_pr():
         return
-    log(h("Creating PR " + green(f"'{e.head}' -> '{e.base}'")), level=1)
+    log(h("Creating MR " + green(f"'{e.head}' -> '{e.base}'")), level=1)
     cmd = [
-        "gh",
-        "pr",
+        "glab",
+        "mr",
         "create",
-        "-B",
+        "-a",
+        get_glab_username(),
+        "--squash-before-merge",
+        "--remove-source-branch",
+        "-b",
         e.base,
-        "-H",
+        "-s",
         e.head,
         "-t",
         e.commit.title(),
-        "-F",
-        "-",
+        "-d",
+        shell_quote(e.commit.commit_msg()),
     ]
     if reviewer:
         cmd.extend(["--reviewer", reviewer])
@@ -596,7 +609,7 @@ def create_pr(e: StackEntry, is_draft: bool, reviewer: str = ""):
         cmd.append("--draft")
 
     try:
-        r = get_command_output(cmd, input=e.commit.commit_msg().encode())
+        r = get_command_output(cmd)
     except Exception:
         error(ERROR_CANT_CREATE_PR.format(**locals()))
         raise
@@ -609,17 +622,24 @@ def generate_toc(st: List[StackEntry], current: str) -> str:
     def toc_entry(se: StackEntry) -> str:
         pr_id = last(se.pr)
         arrow = "__->__" if pr_id == current else ""
-        return f" * {arrow}#{pr_id}\n"
+        return f" * {arrow}!{pr_id}+\n"
 
     entries = (toc_entry(se) for se in st[::-1])
-    return f"Stacked PRs:\n{''.join(entries)}\n"
+    return f"Stacked MRs:\n{''.join(entries)}\n"
 
 
 def get_current_pr_body(e: StackEntry):
     out = get_command_output(
-        ["gh", "pr", "view", e.pr, "--json", "body"],
+        ["glab", "mr", "view", last(e.pr), "-F", "json"],
     )
-    return json.loads(out)["body"].strip()
+    return json.loads(out)["description"].strip()
+
+
+def get_default_branch():
+    out = get_command_output(
+        ["glab", "repo", "view", "-F", "json"],
+    )
+    return json.loads(out)["default_branch"].strip()
 
 
 def add_cross_links(st: List[StackEntry], keep_body: bool):
@@ -654,8 +674,18 @@ def add_cross_links(st: List[StackEntry], keep_body: bool):
             )
 
         run_shell_command(
-            ["gh", "pr", "edit", e.pr, "-t", title, "-F", "-", "-B", e.base],
-            input="\n".join(pr_body).encode(),
+            [
+                "glab",
+                "mr",
+                "update",
+                last(e.pr),
+                "-t",
+                title,
+                "-d",
+                shell_quote("\n".join(pr_body)),
+                "--target-branch",
+                e.base,
+            ],
         )
 
 
@@ -686,7 +716,7 @@ def reset_remote_base_branches(st: List[StackEntry], target: str):
     log(h("Resetting remote base branches"), level=1)
 
     for e in filter(lambda e: e.has_pr(), st):
-        run_shell_command(["gh", "pr", "edit", e.pr, "-B", target])
+        run_shell_command(["glab", "mr", "update", last(e.pr), "--target-branch", target])
 
 
 # If local 'main' lags behind 'origin/main', and 'head' contains all commits
@@ -771,7 +801,7 @@ def command_submit(
     keep_body: bool,
     draft_bitmask: List[bool] = None,
 ):
-    log(h("SUBMIT"), level=1)
+    log(h("EXPORT"), level=1)
 
     current_branch = get_current_branch_name()
 
@@ -788,7 +818,7 @@ def command_submit(
 
     if (draft_bitmask is not None) and (len(draft_bitmask) != len(st)):
         log(
-            h("Draft bitmask passed to 'submit' doesn't match number of PRs!"),
+            h("Draft bitmask passed to 'export' doesn't match number of MRs!"),
             level=1,
         )
         return
@@ -804,13 +834,13 @@ def command_submit(
     top_branch = st[-1].head
     need_to_rebase_current = is_ancestor(top_branch, current_branch)
 
-    reset_remote_base_branches(st, args.target)
-
     # Push local branches to remote
     push_branches(st, args.remote)
 
+    reset_remote_base_branches(st, args.target)
+
     # Now we have all the branches, so we can create the corresponding PRs
-    log(h("Submitting PRs"), level=1)
+    log(h("Exporting MRs"), level=1)
     for e_idx, e in enumerate(st):
         is_pr_draft = draft or ((draft_bitmask is not None) and draft_bitmask[e_idx])
         create_pr(e, is_pr_draft, reviewer)
@@ -830,7 +860,7 @@ def command_submit(
 
     push_branches(st, args.remote)
 
-    log(h("Adding cross-links to PRs"), level=1)
+    log(h("Adding cross-links to MRs"), level=1)
     add_cross_links(st, keep_body)
 
     if need_to_rebase_current:
@@ -879,7 +909,7 @@ def rebase_pr(e: StackEntry, remote: str, target: str):
     except Exception:
         error(ERROR_CANT_REBASE.format(**locals()))
         raise
-    run_shell_command(["git", "push", remote, "-f", f"{e.head}:{e.head}"])
+    run_shell_command(["git", "push", "-f", remote, f"{e.head}:{e.head}"])
 
 
 def land_pr(e: StackEntry, remote: str, target: str):
@@ -894,7 +924,7 @@ def land_pr(e: StackEntry, remote: str, target: str):
         raise
 
     # Switch PR base branch to 'main'
-    run_shell_command(["gh", "pr", "edit", e.pr, "-B", target])
+    run_shell_command(["glab", "mr", "update", last(e.pr), "--target-branch", target])
 
     # Form the commit message: it should contain the original commit message
     # and nothing else.
@@ -904,11 +934,10 @@ def land_pr(e: StackEntry, remote: str, target: str):
     # body:
     lines = pr_body.splitlines()
     pr_id = last(e.pr)
-    title = f"{lines[0]} (#{pr_id})"
+    title = f"{lines[0]} (!{pr_id}+)"
     pr_body = "\n".join(lines[1:]) or " "
     run_shell_command(
-        ["gh", "pr", "merge", e.pr, "--squash", "-t", title, "-F", "-"],
-        input=pr_body.encode(),
+        ["glab", "mr", "merge", pr_id, "--squash", "--squash-message", shell_quote(title + pr_body)]
     )
 
 
@@ -924,7 +953,7 @@ def delete_remote_branches(st: List[StackEntry], remote: str):
     log(h("Deleting remote branches"), level=1)
     run_shell_command(["git", "fetch", "--prune", remote])
 
-    username = get_gh_username()
+    username = get_glab_username()
     refs = get_command_output(
         [
             "git",
@@ -934,11 +963,11 @@ def delete_remote_branches(st: List[StackEntry], remote: str):
         ]
     ).split()
     refs = [x.replace(f"refs/remotes/{remote}/", "") for x in refs]
+    refs = [x.replace(f"'", "") for x in refs]
     remote_branches_to_delete = [e.head for e in st if e.head in refs]
 
     if remote_branches_to_delete:
-        cmd = ["git", "push", "-f", remote]
-        cmd.extend([f":{branch}" for branch in remote_branches_to_delete])
+        cmd = ["git", "push", "-d", "-f", remote] + remote_branches_to_delete
         run_shell_command(cmd, check=False)
 
 
@@ -981,7 +1010,7 @@ def command_land(args: CommonArgs):
         for e in prs_to_rebase:
             rebase_pr(e, args.remote, args.target)
         # Change the target of the new bottom-most PR in the stack to 'target'
-        run_shell_command(["gh", "pr", "edit", prs_to_rebase[0].pr, "-B", args.target])
+        run_shell_command(["glab", "mr", "update", last(prs_to_rebase[0].pr), "--target-branch", args.target])
 
     # Delete local and remote stack branches
     run_shell_command(["git", "checkout", current_branch])
@@ -1033,8 +1062,14 @@ def command_abandon(args: CommonArgs):
     log(h("Stripping stack metadata from commit messages"), level=1)
 
     last_hash = ""
+    mrs_to_close = []
     for e in st:
         last_hash = strip_metadata(e)
+        if e._pr:
+            mrs_to_close.append(last(e._pr))
+
+    log(h("Closing open MRs"), level=1)
+    run_shell_command(["glab", "mr", "close"] + mrs_to_close, check=False)
 
     log(h("Rebasing the current branch on top of updated top branch"), level=1)
     run_shell_command(["git", "rebase", last_hash, current_branch])
@@ -1121,43 +1156,45 @@ def create_argparser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers(help="sub-command help", dest="command")
 
+    check_glab_installed()
+
     common_parser = argparse.ArgumentParser(add_help=False)
     common_parser.add_argument("-R", "--remote", default="origin", help="Remote name")
     common_parser.add_argument("-B", "--base", help="Local base branch")
     common_parser.add_argument("-H", "--head", default="HEAD", help="Local head branch")
     common_parser.add_argument(
-        "-T", "--target", default="main", help="Remote target branch"
+        "-T", "--target", default=get_default_branch(), help="Remote target branch"
     )
 
     parser_submit = subparsers.add_parser(
-        "submit",
-        aliases=["export"],
-        help="Submit a stack of PRs",
+        "export",
+        aliases=["submit"],
+        help="Export a stack of MRs",
         parents=[common_parser],
     )
     parser_submit.add_argument(
         "--keep-body",
         action="store_true",
         default=False,
-        help="Keep current PR body and only add/update cross links",
+        help="Keep current MR body and only add/update cross links",
     )
     parser_submit.add_argument(
         "-d",
         "--draft",
         action="store_true",
         default=False,
-        help="Submit PRs in draft mode",
+        help="Submit MRs in draft mode",
     )
     parser_submit.add_argument(
         "--draft-bitmask",
         type=draft_bitmask_type,
         default=None,
-        help="Bitmask of whether each PR is a draft (optional).",
+        help="Bitmask of whether each MR is a draft (optional).",
     )
     parser_submit.add_argument(
         "--reviewer",
-        default=os.getenv("STACK_PR_DEFAULT_REVIEWER", default=""),
-        help="List of reviewers for the PR",
+        default=os.getenv("STACK_MR_DEFAULT_REVIEWER", default=""),
+        help="List of reviewers for the MR",
     )
 
     subparsers.add_parser(
@@ -1189,8 +1226,6 @@ def main():
         return
 
     common_args = CommonArgs.from_args(args)
-
-    check_gh_installed()
 
     current_branch = get_current_branch_name()
     try:
