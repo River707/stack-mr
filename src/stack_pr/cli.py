@@ -937,7 +937,16 @@ def land_pr(e: StackEntry, remote: str, target: str):
     title = f"{lines[0]} (!{pr_id}+)"
     pr_body = "\n".join(lines[1:]) or " "
     run_shell_command(
-        ["glab", "mr", "merge", pr_id, "--squash", "--squash-message", shell_quote(title + pr_body)]
+        [
+            "glab",
+            "mr",
+            "merge",
+            pr_id,
+            "--auto-merge",
+            "--squash",
+            "--squash-message",
+            shell_quote(title + pr_body),
+        ]
     )
 
 
