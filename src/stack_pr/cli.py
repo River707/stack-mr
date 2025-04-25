@@ -376,7 +376,7 @@ def last(ref: str, sep: str = "/") -> str:
     return ref.rsplit("/", 1)[1]
 
 def shell_quote(s: str):
-    return shlex.quote(s)[1:-1]
+    return s
 
 # TODO: Move to 'modular.utils.git'
 def is_ancestor(commit1: str, commit2: str) -> bool:
@@ -922,20 +922,23 @@ def land_pr(e: StackEntry, remote: str, target: str):
     except Exception:
         error(ERROR_CANT_CHECKOUT_REMOTE_BRANCH.format(**locals()))
         raise
+    pr_id = last(e.pr)
 
     # Switch PR base branch to 'main'
-    run_shell_command(["glab", "mr", "update", last(e.pr), "--target-branch", target])
+    run_shell_command(["glab", "mr", "update", pr_id, "--target-branch", target])
 
-    # Form the commit message: it should contain the original commit message
-    # and nothing else.
-    pr_body = RE_STACK_INFO_LINE.sub("", e.commit.commit_msg())
+    # Use the commit message from the mr.
+    mr_state = json.loads(
+        get_command_output(
+            ["glab", "mr", "view", pr_id, "-F", "json"],
+        )
+    )
+    title = mr_state["title"].strip() + f"(!{pr_id}+)"
+    description = (
+        mr_state["description"].strip().split(CROSS_LINKS_DELIMETER, 1)[-1].lstrip()
+    )
 
-    # Since title is passed separately, we need to strip the first line from the
-    # body:
-    lines = pr_body.splitlines()
-    pr_id = last(e.pr)
-    title = f"{lines[0]} (!{pr_id}+)"
-    pr_body = "\n".join(lines[1:]) or " "
+    # Merge the MR.
     run_shell_command(
         [
             "glab",
@@ -945,7 +948,7 @@ def land_pr(e: StackEntry, remote: str, target: str):
             "--auto-merge",
             "--squash",
             "--squash-message",
-            shell_quote(title + pr_body),
+            shell_quote(title + description),
         ]
     )
 
