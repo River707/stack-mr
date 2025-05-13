@@ -924,9 +924,6 @@ def land_pr(e: StackEntry, remote: str, target: str):
         raise
     pr_id = last(e.pr)
 
-    # Switch PR base branch to 'main'
-    run_shell_command(["glab", "mr", "update", pr_id, "--target-branch", target])
-
     # Use the commit message from the mr.
     mr_state = json.loads(
         get_command_output(
@@ -936,6 +933,11 @@ def land_pr(e: StackEntry, remote: str, target: str):
     title = mr_state["title"].strip() + f"(!{pr_id}+)"
     description = (
         mr_state["description"].strip().split(CROSS_LINKS_DELIMETER, 1)[-1].lstrip()
+    )
+
+    # Switch PR base branch to 'main'
+    run_shell_command(
+        ["glab", "mr", "update", pr_id, "--target-branch", target, "-d", description]
     )
 
     # Merge the MR.
