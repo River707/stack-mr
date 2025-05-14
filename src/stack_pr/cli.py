@@ -950,7 +950,7 @@ def land_pr(e: StackEntry, remote: str, target: str):
             "--auto-merge",
             "--squash",
             "--squash-message",
-            shell_quote(title + description),
+            shell_quote(title + "\n" + description),
         ]
     )
 
