@@ -5,16 +5,19 @@ merge requests (MRs) all at once, with a stacked order of dependencies.
 
 Imagine that we have a change `A` and a change `B` depending on `A`, and we
 would like to get them both reviewed. Without stacked MRs one would have to
-create two MRs: `A` and `A+B`. The second PR would be difficult to review as it
-includes all the changes simultaneously. With stacked MRs the first PR will
-have only the change `A`, and the second PR will only have the change `B`. With
+create two MRs: `A` and `A+B`. The second MR would be difficult to review as it
+includes all the changes simultaneously. With stacked MRs the first MR will
+have only the change `A`, and the second MR will only have the change `B`. With
 stacked MRs one can group related changes together making them easier to
 review.
 
 Example:
+
 ![StackedPRExample1](https://modular-assets.s3.amazonaws.com/images/stackpr/example_0.png)
 
-## Dependencies
+## Installation
+
+### Dependencies
 
 This is a non-comprehensive list of dependencies required by `stack-mr.py`:
 
@@ -26,15 +29,84 @@ This is a non-comprehensive list of dependencies required by `stack-mr.py`:
 Manually, you can clone the repository and run the following command:
 
 ```bash
-pipx install .
+pip install -e .
 ```
 
-## Workflow
+## Usage
 
-`stack-mr` is a tool allowing you to work with stacked MRs: export,
-view, and land them.
+`stack-mr` allows you to work with stacked MRs: export, view, and land them.
 
-The `stack-mr` tool has four commands:
+### Basic Workflow
+
+The most common workflow is simple:
+
+1. Create a feature branch from `main`:
+```bash
+git checkout main
+git pull
+git checkout -b my-feature
+```
+
+2. Make your changes and create multiple commits (one commit per MR you want to create)
+```bash
+# Make some changes
+git commit -m "First change"
+# Make more changes
+git commit -m "Second change"
+# And so on...
+```
+
+3. Review what will be in your stack:
+```bash
+stack-mr view  # Always safe to run, helps catch issues early
+```
+
+4. Create/update the stack of MRs:
+```bash
+stack-mr export
+```
+> **Note**: `export` is an alias for `submit`.
+
+5. To update any MR in the stack:
+- Amend the corresponding commit (for example, by using `git rebase -i HEAD~N`)
+- Run `stack-mr view` to verify your changes
+- Run `stack-mr export` again
+
+6. To rebase your stack on the latest main:
+```bash
+git checkout my-feature
+git fetch origin         # Get the latest main
+git rebase origin/main   # Rebase your commits on top of main
+stack-mr export          # Reexport to update all MRs
+```
+
+7. When your MRs are ready to merge, you have two options:
+
+**Option A**: Using `stack-mr land`:
+```bash
+stack-mr land
+```
+This will:
+- Merge the bottom-most MR in your stack
+- Automatically rebase your remaining MRs
+- You can run `stack-mr land` again to merge the next MR once CI passes
+
+**Option B**: Using GitLab web interface:
+1. Merge the bottom-most MR through GitLab UI
+2. After the merge, on your local machine:
+   ```bash
+   git checkout my-feature
+   git rebase origin/main  # Get the merged changes
+   stack-mr export         # Reexport the stack to rebase remaining MRs
+   ```
+
+That's it!
+
+> **Pro-tip**: Run `stack-mr view` frequently - it's a safe command that helps you understand the current state of your stack and catch any potential issues early.
+
+### Commands
+
+`stack-mr` has four main commands:
 
 - `export` (or `submit`) - create a new stack of MRs from the given set of
   commits. One can think of this as “push my local changes to the corresponding
@@ -46,9 +118,8 @@ The `stack-mr` tool has four commands:
 - `abandon` - remove all stack metadata from the given set of commits. Apart
   from removing the metadata from the affected commits, this command deletes
   the corresponding local and remote branches and closes the MRs.
-- `land` - merge MRs from the stack corresponding to the given set of commits.
-  This command attempts to merge MRs from the stack one by one, and if
-  succeeded deletes the corresponding branches from local and remote repos.
+- `land` - merge the bottom-most MR in the current stack and rebase the rest of
+  the stack on the latest main.
 
 A usual workflow is the following:
 
@@ -67,7 +138,7 @@ Under the hood the tool creates and maintains branches named
 `$USERNAME/stack/$BRANCH_NUM` and embeds stack metadata into commit messages,
 but you are not supposed to work with those branches or edit that metadata
 manually. I.e. instead of pushing to these branches you should use `export`,
-instead of deleting them you should use `abandon`, and instead of merging them
+instead of deleting them you should use `abandon` and instead of merging them
 you should use `land`.
 
 The tool looks at commits in the range `BASE..HEAD` and creates a stack of MRs
@@ -86,8 +157,8 @@ commits to the stack, etc.
 The first step before creating a stack of MRs is to double-check the changes
 we’re going to post.
 
-By default the tool will look at commits in `main..HEAD` range and will create
-a PR for every commit in that range.
+By default `stack-mr` will look at commits in `main..HEAD` range and will create
+a MR for every commit in that range.
 
 For instance, if we have
 
@@ -142,7 +213,7 @@ The command accepts a couple of options that might be useful, namely:
   CI.
 - `--draft-bitmask` - mark select MRs in a stack as draft using a bitmask where
     `1` indicates draft, and `0` indicates non-draft.
-    For example `--draft-bitmask 0010` to make the third PR a draft in a stack
+    For example `--draft-bitmask 0010` to make the third MR a draft in a stack
     of four.
     The length of the bitmask must match the number of stacked MRs.
     Overridden by `--draft` when passed.
@@ -162,13 +233,18 @@ VIEW
 SUCCESS!
 ```
 
-We can also go to gitlab and check our MRs there:
+We can also go to GitLab and check our MRs there:
 
 ![StackedPRExample2](https://modular-assets.s3.amazonaws.com/images/stackpr/example_1.png)
 
 If we need to make changes to any of the MRs (e.g. to address the review
 feedback), we simply amend the desired changes to the appropriate git commits
 and run `export` again. If needed, we can rearrange commits or add new ones.
+
+`export` simply syncs the local changes with the corresponding MRs. This is why
+we use the same `stack-mr export` command when we create a new stack, rebase our
+changes on the latest main, update any MR in the stack, add new commits to the
+stack, or rearrange commits in the stack.
 
 When we are ready to merge our changes, we use `land` command.
 
@@ -188,7 +264,7 @@ Rebasing cc932b71 (!439, 'rriddle/stack/103' -> 'rriddle/stack/102'): Optimized 
 SUCCESS!
 ```
 
-This command lands the first PR of the stack and rebases the rest. If we run
+This command lands the first MR of the stack and rebases the rest. If we run
 `view` command after `land` we will find the remaining, not yet-landed MRs
 there:
 
@@ -202,7 +278,7 @@ VIEW
 
 This way we can land all the MRs from the stack one by one.
 
-## Specifying custom commit ranges
+### Specifying custom commit ranges
 
 The example above used the default commit range - `main..HEAD`, but you can
 specify a custom range too. Below are several commonly useful invocations of
@@ -235,3 +311,49 @@ stack-mr view -B HEAD~5 -H HEAD~2
 # Land first three MRs from the stack
 stack-mr land -B HEAD~5 -H HEAD~2
 ```
+
+Note that generally one doesn't need to specify the base and head branches
+explicitly - `stack-mr` will figure out the correct range based on the current
+branch and the remote `main` by default.
+
+## Command Line Options Reference
+
+### Common Arguments
+
+These arguments can be used with any subcommand:
+
+- `-R, --remote`: Remote name (default: "origin")
+- `-B, --base`: Local base branch
+- `-H, --head`: Local head branch (default: "HEAD")
+- `-T, --target`: Remote target branch (default: "main")
+
+### Subcommands
+
+#### export (alias: export)
+
+Export a stack of MRs.
+
+Options:
+
+- `--keep-body`: Keep current MR body, only update cross-links (default: false)
+- `-d, --draft`: export MRs in draft mode (default: false)
+- `--draft-bitmask`: Bitmask for setting draft status per MR
+- `--reviewer`: List of reviewers for the MRs (default: from $STACK_MR_DEFAULT_REVIEWER)
+
+#### land
+
+Land the bottom-most MR in the current stack.
+
+Takes no additional arguments beyond common ones.
+
+#### abandon
+
+Abandon the current stack.
+
+Takes no additional arguments beyond common ones.
+
+#### view
+
+Inspect the current stack
+
+Takes no additional arguments beyond common ones.
