@@ -297,7 +297,16 @@ class StackEntry:
         out = get_command_output(
             ["glab", "mr", "view", last(self.pr), "-F", "json"],
         )
-        return json.loads(out)["merge_status"].strip() == "can_be_merged"
+        mr_data = json.loads(out)
+
+        # Check for merge_status.
+        if "merge_status" in mr_data:
+            return mr_data["merge_status"].strip() == "can_be_merged"
+        # Fallback to detailed_merge_status.
+        if "detailed_merge_status" in mr_data:
+            return mr_data["detailed_merge_status"].strip() == "can_be_merged"
+        # If neither field is present, assume not mergeable.
+        return False
 
     def __repr__(self):
         return self.pprint()
