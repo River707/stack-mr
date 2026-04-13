@@ -52,7 +52,7 @@ import json
 import os
 import re
 import shlex
-from subprocess import SubprocessError
+from subprocess import SubprocessError, list2cmdline
 
 from stack_pr.git import (
     branch_exists,
@@ -61,6 +61,7 @@ from stack_pr.git import (
     get_glab_username,
     get_uncommitted_changes,
 )
+from stack_pr import shell_commands
 from stack_pr.shell_commands import get_command_output, run_shell_command
 from typing import List, NamedTuple, Optional, Pattern
 
@@ -294,19 +295,13 @@ class StackEntry:
         return s
 
     def is_mergeable(self):
-        out = get_command_output(
-            ["glab", "mr", "view", last(self.pr), "-F", "json"],
-        )
-        mr_data = json.loads(out)
-
-        # Check for merge_status.
-        if "merge_status" in mr_data:
-            return mr_data["merge_status"].strip() == "can_be_merged"
-        # Fallback to detailed_merge_status.
-        if "detailed_merge_status" in mr_data:
-            return mr_data["detailed_merge_status"].strip() == "can_be_merged"
-        # If neither field is present, assume not mergeable.
-        return False
+        if shell_commands.is_dry_run():
+            out = "{\"merge_status\": \"can_be_merged\"}"
+        else:
+            out = get_command_output(
+                ["glab", "mr", "view", last(self.pr), "-F", "json"],
+            )
+            mr_data = json.loads(out)
 
     def __repr__(self):
         return self.pprint()
@@ -451,8 +446,7 @@ def verify(st: List[StackEntry], check_base: bool = False):
             error(ERROR_STACKINFO_BAD_LINK.format(**locals()))
             raise RuntimeError
 
-        ghinfo = get_command_output(
-            [
+        cmd = [
                 "glab",
                 "mr",
                 "view",
@@ -460,7 +454,10 @@ def verify(st: List[StackEntry], check_base: bool = False):
                 "-F",
                 "json",
             ]
-        )
+        if shell_commands.is_dry_run():
+            print(f"[dry-run] {list2cmdline(cmd)}")
+            continue
+        ghinfo = get_command_output(cmd)
         d = json.loads(ghinfo)
         for required_field in ["state", "iid", "target_branch", "source_branch"]:
             if required_field not in d:
@@ -618,7 +615,11 @@ def create_pr(e: StackEntry, is_draft: bool, reviewer: str = ""):
         cmd.append("--draft")
 
     try:
-        r = get_command_output(cmd)
+        if shell_commands.is_dry_run():
+            print(f"[dry-run] {list2cmdline(cmd)}")
+            r = "https://repo/merge_requests/1234567890"
+        else:
+            r = get_command_output(cmd)
     except Exception:
         error(ERROR_CANT_CREATE_PR.format(**locals()))
         raise
@@ -1188,6 +1189,12 @@ def create_argparser() -> argparse.ArgumentParser:
     common_parser.add_argument(
         "-T", "--target", default=get_default_branch(), help="Remote target branch"
     )
+    common_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        default=False,
+        help="Print commands without executing them",
+    )
 
     parser_submit = subparsers.add_parser(
         "export",
@@ -1247,6 +1254,9 @@ def main():
         print(h(red("Invalid usage of the stack-mr command.")))
         parser.print_help()
         return
+
+    if args.dry_run:
+        shell_commands.set_dry_run(True)
 
     common_args = CommonArgs.from_args(args)
 

@@ -4,6 +4,21 @@ from typing import Any, Iterable, Union
 
 ShellCommand = Iterable[Union[str, Path]]
 
+_DRY_RUN: bool = False
+
+
+def set_dry_run(enabled: bool) -> None:
+    """Enable or disable dry-run mode globally.
+
+    When dry-run is enabled, side-effecting shell commands (those not capturing
+    output) are printed instead of executed.
+    """
+    global _DRY_RUN
+    _DRY_RUN = enabled
+
+def is_dry_run() -> bool:
+    """Check if dry-run mode is enabled."""
+    return _DRY_RUN
 
 def run_shell_command(
     cmd: ShellCommand, *, check: bool = True, **kwargs: Any
@@ -24,9 +39,12 @@ def run_shell_command(
     """
     if "shell" in kwargs:
         raise ValueError("shell support has been removed")
-    _ = subprocess.list2cmdline(cmd)
+    cmd_list = list(map(str, cmd))
+    if _DRY_RUN and "capture_output" not in kwargs:
+        print(f"[dry-run] {subprocess.list2cmdline(cmd_list)}")
+        return subprocess.CompletedProcess(cmd_list, 0)
     kwargs.update({"check": check})
-    return subprocess.run(list(map(str, cmd)), **kwargs)
+    return subprocess.run(cmd_list, **kwargs)
 
 
 def get_command_output(cmd: ShellCommand, **kwargs: Any) -> str:
