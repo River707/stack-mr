@@ -841,6 +841,7 @@ def command_submit(
     # If the current branch contains commits from the stack, we will need to
     # rebase it in the end since the commits will be modified.
     top_branch = st[-1].head
+    orig_head_commit = st[-1].commit.commit_id()
     need_to_rebase_current = is_ancestor(top_branch, current_branch)
 
     # Push local branches to remote
@@ -878,7 +879,9 @@ def command_submit(
             [
                 "git",
                 "rebase",
+                "--onto",
                 top_branch,
+                orig_head_commit,
                 current_branch,
                 "--committer-date-is-author-date",
             ]
