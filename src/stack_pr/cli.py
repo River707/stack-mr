@@ -1,7 +1,7 @@
-# stack-pr: a tool for working with stacked PRs on gitlab.
+# stack-mr: a tool for working with stacked MRs on gitlab.
 #
 # ---------------
-# stack-pr submit
+# stack-mr submit
 # ---------------
 #
 # Semantics:
@@ -9,20 +9,20 @@
 #  2. For each commit since merge base do:
 #       a. If it doesnt have stack info:
 #           - create a new head branch for it
-#           - create a new PR for it
+#           - create a new MR for it
 #           - base branch will be the previous commit in the stack
 #       b. If it has stack info: verify its correctness.
 #  3. Make sure all commits in the stack are annotated with stack info
 #  4. Push all the head branches
 #
 # If 'submit' succeeds, you'll get all commits annotated with links to the
-# corresponding PRs and names of the head branches. All the branches will be
-# pushed to remote, and PRs are properly created and interconnected. Base
-# branch of each PR will be the head branch of the previous PR, or 'main' for
-# the first PR in the stack.
+# corresponding MRs and names of the head branches. All the branches will be
+# pushed to remote, and MRs are properly created and interconnected. Base
+# branch of each MR will be the head branch of the previous MR, or 'main' for
+# the first MR in the stack.
 #
 # -------------
-# stack-pr land
+# stack-mr land
 # -------------
 #
 # Semantics:
@@ -31,18 +31,18 @@
 #  3. Check that the stack info is valid. If not, bail.
 #  4. For each commit in the stack, from oldest to newest:
 #     - set base branch to point to main
-#     - merge the corresponding PR
+#     - merge the corresponding MR
 #
-# If 'land' succeeds, all the PRs from the stack will be merged into 'main',
+# If 'land' succeeds, all the MRs from the stack will be merged into 'main',
 # all the corresponding remote and local branches deleted.
 #
 # ----------------
-# stack-pr abandon
+# stack-mr abandon
 # ----------------
 #
 # Semantics:
 # For all commits in the stack that have valid stack-info:
-# Close the corresponding PR, delete the remote and local branch, remove the
+# Close the corresponding MR, delete the remote and local branch, remove the
 # stack-info from commit message.
 #
 # ===----------------------------------------------------------------------=== #
@@ -149,17 +149,17 @@ Please commit or stash them before working with stacks.
 """
 UPDATE_STACK_TIP = """
 If you'd like to push your local changes first, you can use the following command to update the stack:
-  $ stack-pr export -B {top_commit}~{stack_size} -H {top_commit}"""
+  $ stack-mr export -B {top_commit}~{stack_size} -H {top_commit}"""
 EXPORT_STACK_TIP = """
 You can use the following command to do that:
-  $ stack-pr export -B {top_commit}~{stack_size} -H {top_commit}
+  $ stack-mr export -B {top_commit}~{stack_size} -H {top_commit}
 """
 LAND_STACK_TIP = """
 To land it, you could run:
-  $ stack-pr land -B {top_commit}~{stack_size} -H {top_commit}
+  $ stack-mr land -B {top_commit}~{stack_size} -H {top_commit}
 
 If you'd like to land stack except the top N commits, you could use the following command:
-  $ stack-pr land -B {top_commit}~{stack_size} -H {top_commit}~N
+  $ stack-mr land -B {top_commit}~{stack_size} -H {top_commit}~N
 
 If you prefer to merge via the gitlab web UI, please don't forget to edit commit message on the merge page!
 If you use the default commit message filled by the web UI, links to other MRs from the stack will be included in the commit message.
@@ -1244,7 +1244,7 @@ def main():
     args = parser.parse_args()
 
     if not args.command:
-        print(h(red("Invalid usage of the stack-pr command.")))
+        print(h(red("Invalid usage of the stack-mr command.")))
         parser.print_help()
         return
 
