@@ -502,6 +502,9 @@ def draft_bitmask_type(value: str) -> List[bool]:
     # Convert to list of booleans
     return [bool(int(bit)) for bit in value]
 
+def get_branch_prefix() -> str:
+    username = get_glab_username()
+    return f"dev/{username}/stack"
 
 # ===----------------------------------------------------------------------=== #
 # SUBMIT
@@ -535,13 +538,13 @@ def add_or_update_metadata(e: StackEntry, needs_rebase: bool) -> bool:
 
 
 def get_available_branch_name(remote: str) -> str:
-    username = get_glab_username()
+    branch_prefix = get_branch_prefix()
 
     refs = get_command_output(
         [
             "git",
             "for-each-ref",
-            f"refs/remotes/{remote}/{username}/stack",
+            f"refs/remotes/{remote}/{branch_prefix}",
             "--format='%(refname)'",
         ]
     ).split()
@@ -550,7 +553,7 @@ def get_available_branch_name(remote: str) -> str:
     max_ref_num = max(int(last(ref.strip("'"))) for ref in refs) if refs else 0
     new_branch_id = max_ref_num + 1
 
-    return f"{username}/stack/{new_branch_id}"
+    return f"{branch_prefix}/{new_branch_id}"
 
 
 def get_next_available_branch_name(name: str) -> str:
@@ -976,12 +979,12 @@ def delete_remote_branches(st: List[StackEntry], remote: str):
     log(h("Deleting remote branches"), level=1)
     run_shell_command(["git", "fetch", "--prune", remote])
 
-    username = get_glab_username()
+    branch_prefix = get_branch_prefix()
     refs = get_command_output(
         [
             "git",
             "for-each-ref",
-            f"refs/remotes/{remote}/{username}/stack",
+            f"refs/remotes/{remote}/{branch_prefix}",
             "--format='%(refname)'",
         ]
     ).split()
